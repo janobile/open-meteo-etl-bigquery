@@ -2,12 +2,20 @@ from datetime import datetime
 import traceback
 import requests
 import logging
-import json
 import sqlite3
 from google.cloud import bigquery
-from config import DEFAULT_PROJECT_ID
-from config import DEFAULT_DATASET_ID
-from config import SQLITE_TABLE
+from config import (
+    API_BASE_URL,
+    SQLITE_TABLE,
+    DEFAULT_PROJECT_ID,
+    DEFAULT_DATASET_ID,
+    SQLITE_DATABASE_PATH,
+    LOG_LEVEL,
+)
+
+# Configure logging
+log_format = '%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=LOG_LEVEL, format=log_format)
 
 # Define the list of cities and their coordinates
 cities = [
@@ -24,7 +32,7 @@ def extract_data(city):
     # Define the API URL for the city using its latitude and longitude
     latitude = city['latitude']
     longitude = city['longitude']
-    api_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m,relativehumidity_2m,windspeed_10m&forecast_days=10"
+    api_url = f"{API_BASE_URL}/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m,relativehumidity_2m,windspeed_10m&forecast_days=10"
 
     try:
         # Make a GET request to the API
@@ -122,7 +130,7 @@ def load_data(data):
     create_sqlite_database()
 
     # Create SQLite database connection
-    conn = sqlite3.connect("sqlite_database.db")
+    conn = sqlite3.connect(SQLITE_DATABASE_PATH)
     cursor = conn.cursor()
 
     # Insert transformed data into the database
@@ -141,7 +149,7 @@ def load_data(data):
 def export_data_from_sqlite():
 
     # Export data from SQLite to BigQuery
-    conn = sqlite3.connect("sqlite_database.db")
+    conn = sqlite3.connect(SQLITE_DATABASE_PATH)
     cursor = conn.cursor()
     cursor.execute(f"SELECT * FROM {SQLITE_TABLE}")
     rows = cursor.fetchall()
@@ -284,10 +292,5 @@ def main():
         # Log the end of the ETL process with timestamp
         logging.info("ETL process completed.")
 
-if __name__ == "__main__":
-
-    # Configure logging
-    log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    logging.basicConfig(level=logging.INFO, format=log_format)
-    
+if __name__ == "__main__":    
     main()
