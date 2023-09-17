@@ -1,6 +1,7 @@
 from datetime import datetime
 import traceback
 import requests
+import logging
 import json
 import sqlite3
 from google.cloud import bigquery
@@ -15,6 +16,9 @@ cities = [
     {"name": "Cali", "latitude": 3.4372, "longitude": -76.5225}
 ]
 
+class ETLException(Exception):
+    pass
+
 # Function to extract weather data from the API for a given city
 def extract_data(city):
     # Define the API URL for the city using its latitude and longitude
@@ -27,18 +31,23 @@ def extract_data(city):
         response = requests.get(api_url)
 
         # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            # Parse the JSON response
-            data = response.json()
-            return data
-        else:
-            print(f"Failed to retrieve data for {city['name']}. Status Code: {response.status_code}")
-            return None
+        if response.status_code != 200:
+            error_message = f"Failed to retrieve data for {city['name']}. Status Code: {response.status_code}"
+            logging.error(error_message)
+            raise ETLException(error_message)
+
+        data = response.json()
+        
+        success_message = f"Successfully extracted data for {city['name']}."
+        logging.info(success_message)
+
+        return data
 
     except Exception as e:
-        print(f"An error occurred while extracting data for {city['name']}: {str(e)}")
+        error_message = f"An error occurred while extracting data for {city['name']}: {str(e)}"
+        logging.error(error_message)
         traceback.print_exc()
-        return None
+        raise ETLException(error_message)
 
 
 # Function to transform data
@@ -226,24 +235,59 @@ def load_data_bigquery(rows):
 
 # Main function to orchestrate the ETL process
 def main():
-    extracted_data = []
+    try:
+        extracted_data = []
 
-    # Data Extraction (E)
-    for city in cities:
-        weather_data = extract_data(city)
-        if weather_data:
-            transformed_data = transform_data(weather_data, city['name'])
-            if transformed_data:
-                extracted_data.extend(transformed_data)
+        # Log the start of the ETL process
+        logging.info("ETL process started.")
 
-    # Data Loading (L)
-    load_data(extracted_data)
+        # Data Extraction (E)
+        for city in cities:
+            try:
+                weather_data = extract_data(city)
+                if weather_data:
+                    transformed_data = transform_data(weather_data, city['name'])
+                    if transformed_data:
+                        extracted_data.extend(transformed_data)
+            except ETLException as e:
+                logging.error(f"ETL error for {city['name']}: {str(e)}")
 
-    # Export data from SQLite and return the rows
-    rows = export_data_from_sqlite()
+        # Data Loading (L)
+        try:
+            load_data(extracted_data)
+            success_message = "Data loaded successfully into SQLite."
+            logging.info(success_message)
+        except ETLException as e:
+            logging.error(f"ETL error: {str(e)}")
 
-    # Load data into BigQuery
-    load_data_bigquery(rows)
+        # Export data from SQLite and return the rows
+        try:
+            rows = export_data_from_sqlite()
+            success_message = "Data exported successfully from SQLite."
+            logging.info(success_message)
+        except ETLException as e:
+            logging.error(f"ETL error: {str(e)}")
+
+        # Load data into BigQuery
+        try:
+            load_data_bigquery(rows)
+            success_message = "Data loaded successfully into BigQuery."
+            logging.info(success_message)
+        except ETLException as e:
+            logging.error(f"ETL error: {str(e)}")
+
+    except Exception as e:
+        error_message = f"An unexpected error occurred: {str(e)}"
+        logging.error(error_message)
+
+    finally:
+        # Log the end of the ETL process with timestamp
+        logging.info("ETL process completed.")
 
 if __name__ == "__main__":
+
+    # Configure logging
+    log_format = '%(asctime)s - %(levelname)s - %(message)s'
+    logging.basicConfig(level=logging.INFO, format=log_format)
+    
     main()
